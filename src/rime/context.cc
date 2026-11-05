@@ -283,13 +283,9 @@ void Context::set_composition(Composition&& comp) {
 }
 
 void Context::set_input(const string& value) {
-  // T9 增量 compose 依赖：严格追加、回删到非空前缀不视为合成失效
-  // （不递增纪元），增量缓存按前缀检查点自行校验。
-  bool prefix_related =
-      value.size() > input_.size()
-          ? value.compare(0, input_.size(), input_) == 0
-          : !value.empty() && input_.compare(0, value.size(), value) == 0;
-  if (!prefix_related) {
+  // T9 增量 compose 依赖：非空改写不视为合成失效（不递增纪元），
+  // 增量缓存按前缀检查点自行校验（追加、回删、组合内改写都回退到公共前缀）
+  if (value.empty()) {
     BumpCompositionEpoch();
   }
   input_ = value;
