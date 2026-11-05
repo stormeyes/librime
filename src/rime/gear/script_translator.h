@@ -25,12 +25,17 @@ struct SyllableGraph;
 class UserDictionary;
 
 // T9（九键）快速输入的增量 compose 缓存（每个 translator 实例一份）。
-// 仅对「单段起点 + 编码串严格追加 + 纪元/词典版本未变」的查询生效，
+// 仅对「单段起点 + 编码串扩展自某检查点 + 纪元/词典版本未变」的查询生效，
 // 其余情况自动回退全量路径；对全拼等多段输入不产生任何行为差异。
 struct ScriptIncrementalState {
+  // 每轮合成后的状态（输入全部解释、无补全边时）。每轮从最近的、是当前
+  // 输入严格前缀的检查点回退续算，回删因此复现逐键输入时的结果。
+  struct Checkpoint {
+    string input;
+    size_t interpreted_length;
+  };
   bool enabled = false;            // 配置 translator/incremental_compose
-  string input;                    // 上次参与合成的查询输入（段内编码串）
-  size_t interpreted_length = 0;   // 上次音节图解释长度
+  vector<Checkpoint> checkpoints;  // 依次互为严格前缀
   uint64_t composition_epoch = 0;  // 上次合成时的 Context 纪元
   uint64_t user_dict_tick = 0;     // 上次合成时的用户词典版本
   uint32_t dict_checksum = 0;      // prism 指纹，防词典重部署后误用
@@ -39,7 +44,7 @@ struct ScriptIncrementalState {
   WordGraph graph;                 // 桶缓存（旧桶复用，新桶追加）
   an<Poet::Lattice> lattice;       // Poet 前向搜索状态
   SyllableGraphCache syllable_cache;  // 音节图增量缓存（syllabifier 持有）
-  bool has_graph = false;          // graph/lattice 与上述指纹配套有效
+  bool has_graph = false;          // graph/lattice/检查点与上述指纹配套有效
 };
 
 class ScriptTranslator : public Translator,
@@ -61,16 +66,19 @@ class ScriptTranslator : public Translator,
 
   // ── T9 增量 compose（详见 ScriptIncrementalState）──
   ScriptIncrementalState* incremental_state() { return incremental_.get(); }
-  // 守卫：单段起点 + 严格追加 + 纪元/词典版本未变；通过时输出旧解释长度
+  // 守卫：纪元/词典版本未变 + 有检查点是 input 的严格前缀；通过时把
+  // 桶/lattice 回退到该检查点并输出其解释长度
   bool TryBeginIncremental(const string& input,
                            UserDictionary* user_dict,
                            size_t* old_interpreted);
-  // 一轮合成结束后更新缓存指纹；cacheable=false 时作废桶/lattice 缓存
+  // 一轮合成结束后更新指纹；rebuilt=全量重建（清空检查点），
+  // checkpointable=本轮可作检查点（否则清空）；无检查点时作废桶/lattice
   void CommitIncremental(const string& input,
                          size_t interpreted_length,
                          UserDictionary* user_dict,
                          const string& preceding_text,
-                         bool cacheable);
+                         bool checkpointable,
+                         bool rebuilt);
 
   bool ConcatenatePhrases(CommitEntry& commit_entry,
                           const vector<an<Phrase>>& phrases);

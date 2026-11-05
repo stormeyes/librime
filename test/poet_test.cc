@@ -120,6 +120,73 @@ static void RunEquivalenceScenario(unsigned seed, size_t max_len) {
   }
 }
 
+// 回删：把桶与 lattice 回退到 len-1、重新追加 len 的桶后增量续算，
+// 须复现逐键输入到 len 时的整句。
+static void RunRollbackScenario(unsigned seed, size_t max_len) {
+  Language lang("t9_test");
+  Poet poet(&lang, nullptr);
+  std::mt19937 gen(seed);
+  std::uniform_int_distribution<int> count(1, 3);
+  std::uniform_real_distribution<double> weight(-8.0, -1.0);
+  std::vector<std::map<int, DictEntryList>> buckets(max_len + 1);
+  for (size_t len = 2; len <= max_len; ++len) {
+    for (size_t start = 0; start < len; ++start) {
+      DictEntryList& entries = buckets[len][static_cast<int>(start)];
+      for (int i = 0, n = count(gen); i < n; ++i) {
+        auto entry = New<DictEntry>();
+        entry->text = "w" + std::to_string(start) + "_" + std::to_string(len) +
+                      "_" + std::to_string(i);
+        entry->weight = weight(gen);
+        entries.push_back(entry);
+      }
+    }
+  }
+  auto enroll = [&](WordGraph& graph, size_t len) {
+    for (const auto& kv : buckets[len])
+      graph[kv.first][static_cast<int>(len)] = kv.second;
+  };
+  auto step = [&](WordGraph& graph, an<Poet::Lattice>& lattice, size_t len) {
+    an<Sentence> s;
+    if (lattice)
+      s = poet.MakeSentenceIncremental(graph, len, "", lattice);
+    return s ? s : poet.MakeSentence(graph, len, "", &lattice);
+  };
+
+  WordGraph graph;
+  an<Poet::Lattice> lattice;
+  std::vector<an<Sentence>> typed(max_len + 1);
+  for (size_t len = 2; len <= max_len; ++len) {
+    enroll(graph, len);
+    typed[len] = step(graph, lattice, len);
+  }
+  for (size_t len = max_len; len >= 3; --len) {
+    for (auto& x : graph)
+      x.second.erase(x.second.upper_bound(static_cast<int>(len - 1)),
+                     x.second.end());
+    lattice->Rollback(len - 1);
+    enroll(graph, len);
+    auto s = step(graph, lattice, len);
+    ASSERT_EQ(!s, !typed[len]) << "seed=" << seed << " len=" << len;
+    if (!s)
+      continue;
+    EXPECT_EQ(s->text(), typed[len]->text()) << "seed=" << seed << " len=" << len;
+    EXPECT_EQ(s->word_lengths(), typed[len]->word_lengths())
+        << "seed=" << seed << " len=" << len;
+    EXPECT_NEAR(s->weight(), typed[len]->weight(), 1e-12)
+        << "seed=" << seed << " len=" << len;
+  }
+}
+
+TEST(PoetIncrementalTest, RollbackReplaysTypedSentence) {
+  Registry::instance().Unregister("grammar");
+  for (unsigned seed = 1; seed <= 30; ++seed)
+    RunRollbackScenario(seed, 14);
+  Registry::instance().Register("grammar", new FakeGrammarComponent);
+  for (unsigned seed = 1; seed <= 30; ++seed)
+    RunRollbackScenario(seed, 14);
+  Registry::instance().Unregister("grammar");
+}
+
 TEST(PoetIncrementalTest, DynamicProgrammingIncrementalMatchesFullRun) {
   // 确保无 grammar 组件：Poet 走 DynamicProgramming 分支
   Registry::instance().Unregister("grammar");

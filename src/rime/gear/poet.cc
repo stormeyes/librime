@@ -191,6 +191,12 @@ struct DynamicProgramming {
 template <class Strategy>
 struct Poet::TypedLattice : Poet::Lattice {
   map<int, typename Strategy::State> states;
+
+  // states[q<=pos] 只引用 q 之前的状态与 end<=q 的词条，截断后仍有效
+  void Rollback(size_t pos) override {
+    states.erase(states.upper_bound(static_cast<int>(pos)), states.end());
+    total_length = pos;
+  }
 };
 
 template <class Strategy>

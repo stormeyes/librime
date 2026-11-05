@@ -43,6 +43,10 @@ class Poet {
 
     // 生成该状态时造句的 total_length（= interpreted_length）
     size_t total_length = 0;
+
+    // 回退到 total_length=pos 时的状态（丢弃 pos 之后的位置），
+    // WordGraph 须同步删去 end > pos 的桶
+    virtual void Rollback(size_t pos) = 0;
   };
 
   Poet(const Language* language,
