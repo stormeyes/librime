@@ -24,10 +24,9 @@ class RIME_DLL Opencc {
   virtual bool ConvertWord(const string& text, vector<string>* forms);
   virtual bool RandomConvertText(const string& text, string* simplified);
   virtual bool ConvertText(const string& text, string* simplified);
-
- private:
   void Initialize();
 
+ private:
   bool initialized_;
   path config_path_;
   std::shared_ptr<opencc::Converter> converter_;

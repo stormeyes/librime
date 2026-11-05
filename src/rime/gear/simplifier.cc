@@ -59,6 +59,20 @@ Simplifier::Simplifier(const Ticket& ticket, an<Opencc> opencc)
   if (random_) {
     srand((unsigned)time(NULL));
   }
+  // opencc 词典惰性加载要 ~50ms：在开关打开时（会话创建时多在后台线程）
+  // 就加载，免得落在第一个按键上
+  if (engine_ && opencc_) {
+    option_update_connection_ =
+        engine_->context()->option_update_notifier().connect(
+            [this](Context* ctx, const string& option) {
+              if (option == option_name_ && ctx->get_option(option))
+                opencc_->Initialize();
+            });
+  }
+}
+
+Simplifier::~Simplifier() {
+  option_update_connection_.disconnect();
 }
 
 class SimplifiedTranslation : public PrefetchTranslation {

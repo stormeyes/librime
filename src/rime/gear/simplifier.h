@@ -18,6 +18,7 @@ class Opencc;
 class Simplifier : public Filter, TagMatching {
  public:
   RIME_DLL Simplifier(const Ticket& ticket, an<Opencc> opencc);
+  virtual ~Simplifier();
 
   virtual an<Translation> Apply(an<Translation> translation,
                                 CandidateList* candidates);
@@ -42,6 +43,7 @@ class Simplifier : public Filter, TagMatching {
   bool inherit_comment_ = true;
   Projection comment_formatter_;
   bool random_ = false;
+  connection option_update_connection_;
 };
 
 class SimplifierComponent : public Simplifier::Component {
