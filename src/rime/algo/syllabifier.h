@@ -44,6 +44,25 @@ struct SyllableGraph {
   SpellingIndices indices;
 };
 
+// reach[h][p]: farthest position reachable from p within h edges.
+inline vector<vector<size_t>> SyllableGraphReach(const SyllableGraph& graph,
+                                                 size_t max_hops) {
+  size_t n = graph.interpreted_length + 1;
+  for (const auto& x : graph.edges)
+    for (const auto& y : x.second)
+      n = (std::max)(n, y.first + 1);
+  vector<vector<size_t>> reach(max_hops + 1, vector<size_t>(n));
+  for (size_t p = 0; p < n; ++p)
+    reach[0][p] = p;
+  for (size_t h = 1; h <= max_hops; ++h) {
+    reach[h] = reach[h - 1];
+    for (const auto& x : graph.edges)
+      for (const auto& y : x.second)
+        reach[h][x.first] = (std::max)(reach[h][x.first], reach[h - 1][y.first]);
+  }
+  return reach;
+}
+
 // ── T9（九键）增量音节图缓存 ──
 // 纯数字输入逐位增长时（九键快速输入），音节图构建是
 // (input, prism, 选项) 的纯函数：BFS 阶段对旧前缀逐位复现一致。

@@ -609,6 +609,11 @@ bool Table::QueryMulti(const SyllableGraph& syll_graph,
   }
   if (q.empty())
     return false;
+  // items that can't reach min_end_pos within the remaining levels collect
+  // nothing.
+  vector<vector<size_t>> reach;
+  if (min_end_pos != 0)
+    reach = SyllableGraphReach(syll_graph, Code::kIndexCodeMaxLength);
   while (!q.empty()) {
     QueueItem item(q.front());
     q.pop();
@@ -661,6 +666,9 @@ bool Table::QueryMulti(const SyllableGraph& syll_graph,
         }
         if (end_pos < syll_graph.interpreted_length &&
             (min_start_pos == 0 || end_pos >= min_start_pos) &&
+            (reach.empty() ||
+             reach[Code::kIndexCodeMaxLength - query.level() - 1][end_pos] >=
+                 min_end_pos) &&
             query.Advance(syll_id, next_credibility, delta_quality_len,
                           current_pos)) {
           q.push(QueueItem{item.origin, end_pos, query});

@@ -29,8 +29,10 @@ struct DfsState {
   size_t predict_word_from_depth;
   TickCount present_tick;
   // 0 = no lower bound; otherwise only collect entries ending at or beyond
-  // it (T9 incremental compose). DFS recursion is unaffected.
+  // it (T9 incremental compose).
   size_t min_end_pos = 0;
+  // set with min_end_pos; branches that can't reach it are cut.
+  vector<vector<size_t>> reach;
   Code code;
   vector<double> credibility;
   vector<double> quality_len;
@@ -237,13 +239,27 @@ void UserDictionary::DfsLookup(const SyllableGraph& syll_graph,
     BOOST_SCOPE_EXIT_END
     if (!TranslateCodeToString(state->code, &prefix))
       continue;
+    // the cursor never sits past an unvisited key <= prefix: a key beyond
+    // prefix proves the db has nothing under it, a key under it is already
+    // where ForwardScan(prefix) would land.
+    bool at_prefix = false;
+    if (!state->key.empty() && state->key > prefix) {
+      if (!state->IsPrefixMatch(prefix))
+        continue;
+      at_prefix = true;
+    }
     for (size_t i = 0; i < spelling.second.size(); ++i) {
       auto props = spelling.second[i];
       if (i > 0 && props->type >= kAbbreviation)
         continue;
+      size_t end_pos = props->end_pos;
+      if (!state->reach.empty() && end_pos < state->min_end_pos &&
+          (state->depth() >= state->depth_limit ||
+           state->reach[state->depth_limit - state->depth()][end_pos] <
+               state->min_end_pos))
+        continue;
       state->credibility.push_back(state->credibility.back() +
                                    props->credibility);
-      size_t end_pos = props->end_pos;
       // 全碼匹配長度積分
       bool is_normal_spelling = props->type == kNormalSpelling;
       double delta_quality_len =
@@ -256,7 +272,9 @@ void UserDictionary::DfsLookup(const SyllableGraph& syll_graph,
       }
       BOOST_SCOPE_EXIT_END
       DLOG(INFO) << "edge: [" << current_pos << ", " << end_pos << ")";
-      if (prefix != state->key) {  // 'a b c |d ' > 'a b c \tabracadabra'
+      if (at_prefix) {
+        at_prefix = false;
+      } else {
         DLOG(INFO) << "forward scanning for '" << prefix << "'.";
         if (!state->ForwardScan(prefix))  // reached the end of db
           continue;
@@ -331,6 +349,11 @@ an<UserDictEntryCollector> UserDictionary::Lookup(
   state.depth_limit = depth_limit;
   state.predict_word_from_depth = predict_word_from_depth;
   state.min_end_pos = min_end_pos;
+  if (min_end_pos && depth_limit) {
+    state.reach = SyllableGraphReach(syll_graph, depth_limit);
+    if (state.reach[depth_limit][start_pos] < min_end_pos)
+      return nullptr;
+  }
   FetchTickCount();
   state.present_tick = tick_ + 1;
   state.credibility.push_back(initial_credibility);
