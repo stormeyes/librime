@@ -72,13 +72,15 @@ class ScriptTranslator : public Translator,
                            UserDictionary* user_dict,
                            size_t* old_interpreted);
   // 一轮合成结束后更新指纹；rebuilt=全量重建（清空检查点），
-  // checkpointable=本轮可作检查点（否则清空）；无检查点时作废桶/lattice
+  // checkpointable=本轮可作检查点（否则清空）；transient=检查点原样保留、
+  // 本轮不入列；无检查点时作废桶/lattice
   void CommitIncremental(const string& input,
                          size_t interpreted_length,
                          UserDictionary* user_dict,
                          const string& preceding_text,
                          bool checkpointable,
-                         bool rebuilt);
+                         bool rebuilt,
+                         bool transient = false);
 
   bool ConcatenatePhrases(CommitEntry& commit_entry,
                           const vector<an<Phrase>>& phrases);

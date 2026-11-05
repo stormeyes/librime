@@ -797,6 +797,23 @@ static bool HasAbbreviationTail(const SyllableGraph& graph,
          v != graph.vertices.end() && v->second >= kAbbreviation;
 }
 
+// 简拼尾巴最多回看几位找干净前缀；更长的照旧全量
+static const size_t kMaxAbbreviationLookBack = 4;
+
+// 增量续算后的末位简拼状态不作检查点：其桶含整串简拼边，被后续按键
+// 复用会把句子建在比全量更脏的图上；下一键从最近的干净检查点重查。
+// 正常语句距干净检查点不超过 2 位；连串简拼更远时照旧入列，否则每键
+// 重查的桶随距离线性增长（乱码输入实测单键 50→100 ms）
+static bool IsTransientState(const ScriptIncrementalState& inc,
+                             const SyllableGraph& graph,
+                             const string& input) {
+  const size_t kMaxTransientDistance = 2;
+  return !inc.checkpoints.empty() &&
+         input.size() - inc.checkpoints.back().input.size() <=
+             kMaxTransientDistance &&
+         HasAbbreviationTail(graph, input.size());
+}
+
 bool ScriptTranslator::TryBeginIncremental(const string& input,
                                            UserDictionary* user_dict,
                                            size_t* old_interpreted) {
@@ -857,14 +874,17 @@ void ScriptTranslator::CommitIncremental(const string& input,
                                          UserDictionary* user_dict,
                                          const string& preceding_text,
                                          bool checkpointable,
-                                         bool rebuilt) {
+                                         bool rebuilt,
+                                         bool transient) {
   auto* inc = incremental_.get();
   if (!inc)
     return;
-  if (rebuilt || !checkpointable)
-    inc->checkpoints.clear();
-  if (checkpointable)
-    inc->checkpoints.push_back({input, interpreted_length});
+  if (!transient) {
+    if (rebuilt || !checkpointable)
+      inc->checkpoints.clear();
+    if (checkpointable)
+      inc->checkpoints.push_back({input, interpreted_length});
+  }
   inc->composition_epoch =
       engine_ ? engine_->context()->composition_epoch() : 0;
   inc->user_dict_tick = user_dict ? (uint64_t)user_dict->tick() : 0;
@@ -886,12 +906,10 @@ bool ScriptTranslation::SeedPrefix(Dictionary* dict,
                                    UserDictionary* user_dict,
                                    const string& preceding,
                                    size_t* old_interpreted) {
-  // 只回看几位；更长的简拼尾巴照旧全量
-  const size_t kMaxLookBack = 4;
   const string& input = syllabifier_->input();
   auto* inc = translator_->incremental_state();
-  for (size_t n = input.size() - 1; n > 0 && input.size() - n <= kMaxLookBack;
-       --n) {
+  for (size_t n = input.size() - 1;
+       n > 0 && input.size() - n <= kMaxAbbreviationLookBack; --n) {
     SyllableGraph graph;
     syllabifier_->BuildPrefixGraph(*dict->prism(), n, &graph);
     if (!IsCheckpointable(graph, n) || HasAbbreviationTail(graph, n))
@@ -945,8 +963,9 @@ an<Sentence> ScriptTranslation::MakeSentence(Dictionary* dict,
       sentence->Offset(start_);
       sentence->set_syllabifier(syllabifier_);
     }
-    translator_->CommitIncremental(input, interpreted, user_dict, preceding,
-                                   checkpointable, false);
+    translator_->CommitIncremental(
+        input, interpreted, user_dict, preceding, checkpointable, false,
+        IsTransientState(*inc, syllable_graph, input));
     return sentence;
   }
 
@@ -1000,8 +1019,9 @@ deque<an<Sentence>> ScriptTranslation::MakeSentences(
       sentence->Offset(start_);
       sentence->set_syllabifier(syllabifier_);
     }
-    translator_->CommitIncremental(input, interpreted, user_dict, preceding,
-                                   checkpointable, false);
+    translator_->CommitIncremental(
+        input, interpreted, user_dict, preceding, checkpointable, false,
+        IsTransientState(*inc, syllable_graph, input));
     return sentences;
   }
 
