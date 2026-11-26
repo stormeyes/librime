@@ -26,6 +26,7 @@
 #include <rime/dict/user_dictionary.h>
 #include <rime/gear/poet.h>
 #include <rime/gear/script_translator.h>
+#include <rime/gear/user_phrase_priority.h>
 #include <rime/gear/translator_commons.h>
 
 // static const char* quote_left = "\xef\xbc\x88";
@@ -240,6 +241,10 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
       enable_word_completion_ = enable_completion_;
     }
     config->GetInt(name_space_ + "/max_homophones", &max_homophones_);
+    config->GetInt(name_space_ + "/user_phrase_priority_min_commits",
+                   &user_phrase_priority_min_commits_);
+    config->GetDouble(name_space_ + "/user_phrase_priority_min_weight",
+                      &user_phrase_priority_min_weight_);
     config->GetBool(name_space_ + "/incremental_compose",
                     &incremental_enabled_);
     poet_.reset(new Poet(language(), config));
@@ -687,6 +692,15 @@ iter_incremented:
               // 因對糾錯候選施加了較大懲罰, 通常結果爲 系統原文 > 用戶糾錯
               // 兩者皆糾錯時, 用戶詞的動態權重有助達成 用戶糾錯 > 系統糾錯
               return uter.Peek()->weight >= iter.Peek()->weight;
+            }
+            // 只上屏過一次或已衰減殆盡的用戶詞不享優先權, 回歸權重比較
+            const auto& user_entry = uter.Peek();
+            if (!UserPhraseKeepsPriority(
+                    user_entry->commit_count,
+                    user_entry->weight - user_entry->credibility,
+                    translator_->user_phrase_priority_min_commits(),
+                    translator_->user_phrase_priority_min_weight())) {
+              return user_entry->weight >= iter.Peek()->weight;
             }
             // 長詞聯想之前須至少出一個嚴格匹配的候選
             // 故確定首選之際, 系統嚴格匹配 > 用戶長詞聯想

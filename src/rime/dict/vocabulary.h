@@ -53,6 +53,8 @@ struct DictEntry {
   // 全碼匹配長度積分，記錄該詞條對應的路徑中，屬於「全拼」部分的字符總長度
   double quality_len = 0.0;
   int commit_count = 0;
+  // 拼写惩罚（模糊音/简拼等，已计入 weight），用户词判定是否保留优先权时扣除
+  double credibility = 0.0;
   int remaining_code_length = 0;
   int matching_code_size = 0;
 

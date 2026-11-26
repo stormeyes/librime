@@ -77,3 +77,39 @@ TEST(RimeCalculusTest, Abbreviation) {
   EXPECT_EQ(rime::kAbbreviation, s.properties.type);
   EXPECT_DOUBLE_EQ(log(0.5), s.properties.credibility);
 }
+
+TEST(RimeCalculusTest, FuzzingDefaultPenalty) {
+  rime::Calculus calc;
+  rime::the<rime::Calculation> c(calc.Parse("fuzz/^([zcs])h/$1/"));
+  ASSERT_TRUE(bool(c));
+  rime::Spelling s("shang");
+  EXPECT_TRUE(c->Apply(&s));
+  EXPECT_EQ("sang", s.str);
+  EXPECT_EQ(rime::kFuzzySpelling, s.properties.type);
+  EXPECT_NEAR(std::log(0.5), s.properties.credibility, 1e-9);
+}
+
+TEST(RimeCalculusTest, FuzzingWithWeight) {
+  rime::Calculus calc;
+  rime::the<rime::Calculation> c(calc.Parse("fuzz/^([zcs])h/$1/0.05"));
+  ASSERT_TRUE(bool(c));
+  EXPECT_TRUE(c->addition());
+  EXPECT_FALSE(c->deletion());
+  rime::Spelling s("shang");
+  EXPECT_TRUE(c->Apply(&s));
+  EXPECT_EQ("sang", s.str);
+  EXPECT_EQ(rime::kFuzzySpelling, s.properties.type);
+  EXPECT_NEAR(std::log(0.05), s.properties.credibility, 1e-9);
+}
+
+TEST(RimeCalculusTest, FuzzingIgnoresInvalidWeight) {
+  rime::Calculus calc;
+  for (const char* def : {"fuzz/^([zcs])h/$1/abc", "fuzz/^([zcs])h/$1/0",
+                          "fuzz/^([zcs])h/$1/1.5"}) {
+    rime::the<rime::Calculation> c(calc.Parse(def));
+    ASSERT_TRUE(bool(c)) << def;
+    rime::Spelling s("shang");
+    EXPECT_TRUE(c->Apply(&s));
+    EXPECT_NEAR(std::log(0.5), s.properties.credibility, 1e-9) << def;
+  }
+}

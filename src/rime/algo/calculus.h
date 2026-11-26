@@ -76,11 +76,14 @@ class Derivation : public Transformation {
   bool deletion() override { return false; }
 };
 
-// fuzz/zyx/zx/
+// fuzz/zyx/zx/ 或 fuzz/zyx/zx/0.05（可选权重 (0,1]，惩罚 = log(权重)，缺省 0.5）
 class Fuzzing : public Derivation {
  public:
   static Factory Parse;
   bool Apply(Spelling* spelling) override;
+
+ protected:
+  double penalty_;
 };
 
 // abbrev/zyx/z/

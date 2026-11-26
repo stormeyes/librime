@@ -592,6 +592,7 @@ an<DictEntry> UserDictionary::CreateDictEntry(const string& key,
   double weight = algo::formula_p(0, (double)v.commits / present_tick,
                                   (double)present_tick, v.dee);
   e->weight = log(weight > 0 ? weight : DBL_EPSILON) + credibility;
+  e->credibility = credibility;
   e->quality_len = quality_len;
   if (full_code) {
     *full_code = key.substr(0, separator_pos);

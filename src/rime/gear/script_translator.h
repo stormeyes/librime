@@ -7,6 +7,7 @@
 #ifndef RIME_SCRIPT_TRANSLATOR_H_
 #define RIME_SCRIPT_TRANSLATOR_H_
 
+#include <limits>
 #include <rime/common.h>
 #include <rime/translation.h>
 #include <rime/translator.h>
@@ -93,12 +94,20 @@ class ScriptTranslator : public Translator,
   bool enable_word_completion() const { return enable_word_completion_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
+  int user_phrase_priority_min_commits() const {
+    return user_phrase_priority_min_commits_;
+  }
+  double user_phrase_priority_min_weight() const {
+    return user_phrase_priority_min_weight_;
+  }
 
  protected:
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;
   int core_word_length_ = 0;
+  int user_phrase_priority_min_commits_ = 0;
+  double user_phrase_priority_min_weight_ = -std::numeric_limits<double>::infinity();
   bool always_show_comments_ = false;
   bool enable_correction_ = false;
   bool enable_word_completion_ = false;

@@ -16,10 +16,27 @@
 
 namespace rime {
 
+struct SyllableGraph;
+
 namespace dictionary {
 
 struct Chunk;
 struct QueryResult;
+
+struct CodeMatch {
+  bool success;
+  size_t depth;
+  size_t end_pos;
+  // 沿途音节的拼写惩罚之和
+  double credibility = 0.0;
+};
+
+// 词条超出表索引部分（extra code）在音节图上的最长匹配
+CodeMatch match_extra_code(const table::Code* extra_code,
+                           size_t depth,
+                           const SyllableGraph& syll_graph,
+                           size_t current_pos,
+                           bool predict_word);
 
 }  // namespace dictionary
 

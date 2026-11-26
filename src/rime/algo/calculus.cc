@@ -4,6 +4,8 @@
 //
 // 2012-01-17 GONG Chen <chen.sst@gmail.com>
 //
+#include <cmath>
+#include <cstdlib>
 #include <boost/algorithm/string.hpp>
 #include <utf8.h>
 #include <rime/algo/calculus.h>
@@ -170,10 +172,7 @@ Calculation* Derivation::Parse(const vector<string>& args) {
     }
     // 模糊音
     if (tag == "fuzz") {
-      the<Fuzzing> x(new Fuzzing);
-      x->pattern_.assign(left);
-      x->replacement_.assign(right);
-      return x.release();
+      return Fuzzing::Parse({"fuzz", left, right});
     }
     // tag 無法識別, 作爲普通 derive 處理
   }
@@ -196,6 +195,15 @@ Calculation* Fuzzing::Parse(const vector<string>& args) {
   the<Fuzzing> x(new Fuzzing);
   x->pattern_.assign(left);
   x->replacement_.assign(right);
+  x->penalty_ = kFuzzySpellingPenalty;
+  if (args.size() > 3 && !args[3].empty()) {
+    char* end = nullptr;
+    double weight = std::strtod(args[3].c_str(), &end);
+    if (end != args[3].c_str() && *end == '\0' && weight > 0 && weight <= 1)
+      x->penalty_ = std::log(weight);
+    else
+      LOG(WARNING) << "invalid fuzz weight '" << args[3] << "', using default";
+  }
   return x.release();
 }
 
@@ -203,7 +211,7 @@ bool Fuzzing::Apply(Spelling* spelling) {
   bool result = Transformation::Apply(spelling);
   if (result) {
     spelling->properties.type = kFuzzySpelling;
-    spelling->properties.credibility += kFuzzySpellingPenalty;
+    spelling->properties.credibility += penalty_;
   }
   return result;
 }
