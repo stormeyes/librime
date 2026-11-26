@@ -39,6 +39,7 @@ struct ScriptIncrementalState {
   vector<Checkpoint> checkpoints;  // 依次互为严格前缀
   uint64_t composition_epoch = 0;  // 上次合成时的 Context 纪元
   uint64_t user_dict_tick = 0;     // 上次合成时的用户词典版本
+  uint64_t history_version = 0;    // 上次合成时的用户历史版本
   uint32_t dict_checksum = 0;      // prism 指纹，防词典重部署后误用
   uint32_t schema_checksum = 0;
   string preceding_text;           // 上次 GetPrecedingText(0) 结果
@@ -94,6 +95,9 @@ class ScriptTranslator : public Translator,
   bool enable_word_completion() const { return enable_word_completion_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
+  uint64_t history_version() const {
+    return history_ ? history_->version() : 0;
+  }
   int user_phrase_priority_min_commits() const {
     return user_phrase_priority_min_commits_;
   }
@@ -114,6 +118,8 @@ class ScriptTranslator : public Translator,
   bool incremental_enabled_ = true;
   the<Corrector> corrector_;
   the<Poet> poet_;
+  an<UserHistoryLm> history_;
+  bool record_history_ = false;
   the<ScriptIncrementalState> incremental_;
   vector<an<Phrase>> queue_;
 };

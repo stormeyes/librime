@@ -19,6 +19,7 @@
 #include <rime/engine.h>
 #include <rime/language.h>
 #include <rime/schema.h>
+#include <rime/service.h>
 #include <rime/translation.h>
 #include <rime/algo/syllabifier.h>
 #include <rime/dict/corrector.h>
@@ -26,6 +27,7 @@
 #include <rime/dict/user_dictionary.h>
 #include <rime/gear/poet.h>
 #include <rime/gear/script_translator.h>
+#include <rime/gear/user_history_lm.h>
 #include <rime/gear/user_phrase_priority.h>
 #include <rime/gear/translator_commons.h>
 
@@ -248,6 +250,14 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetBool(name_space_ + "/incremental_compose",
                     &incremental_enabled_);
     poet_.reset(new Poet(language(), config));
+    auto history_config = LoadHistoryLmConfig(config, name_space_);
+    if (history_config.active()) {
+      path file = Service::instance().deployer().user_data_dir /
+                  path(history_config.file);
+      history_ = UserHistoryLm::Get(file.string());
+      record_history_ = history_config.record;
+      poet_->set_history(history_.get(), history_config.params);
+    }
   }
   if (incremental_enabled_) {
     incremental_.reset(new ScriptIncrementalState);
@@ -401,6 +411,12 @@ bool ScriptTranslator::UpdateElements(const CommitEntry& commit_entry) {
 bool ScriptTranslator::Memorize(const CommitEntry& commit_entry) {
   UpdateElements(commit_entry);
   user_dict_->UpdateEntry(commit_entry, 1);
+  if (history_ && record_history_) {
+    vector<string> words;
+    for (const DictEntry* e : commit_entry.elements)
+      words.push_back(e->text);
+    history_->Record(Spell(commit_entry.code), words);
+  }
   return true;
 }
 
@@ -852,6 +868,8 @@ bool ScriptTranslator::TryBeginIncremental(const string& input,
       miss = "user-dict";
     } else if (GetPrecedingText(0) != inc->preceding_text) {
       miss = "preceding";
+    } else if (history_version() != inc->history_version) {
+      miss = "history";
     } else {
       for (keep = inc->checkpoints.size(); keep > 0; --keep) {
         const string& cp = inc->checkpoints[keep - 1].input;
@@ -902,6 +920,7 @@ void ScriptTranslator::CommitIncremental(const string& input,
   inc->composition_epoch =
       engine_ ? engine_->context()->composition_epoch() : 0;
   inc->user_dict_tick = user_dict ? (uint64_t)user_dict->tick() : 0;
+  inc->history_version = history_version();
   inc->dict_checksum = dict_ && dict_->prism()
                            ? dict_->prism()->dict_file_checksum()
                            : 0;

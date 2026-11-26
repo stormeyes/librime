@@ -18,6 +18,7 @@
 #include <rime/dict/vocabulary.h>
 #include <rime/gear/grammar.h>
 #include <rime/gear/poet.h>
+#include <rime/gear/user_history_lm.h>
 #include <rime/language.h>
 #include <rime/registry.h>
 
@@ -51,9 +52,13 @@ class FakeGrammarComponent : public Grammar::Component {
 
 // 模拟九键逐位追加：每轮对两个 graph 追加相同的桶，
 // 增量路径（ginc + lattice）与全量参照（gfull）产出必须一致。
-static void RunEquivalenceScenario(unsigned seed, size_t max_len) {
+static void RunEquivalenceScenario(unsigned seed,
+                                   size_t max_len,
+                                   bool with_history = false) {
   Language lang("t9_test");
   Poet poet(&lang, nullptr);
+  UserHistoryLm history;
+  vector<string> texts;
 
   WordGraph ginc, gfull;
   an<Poet::Lattice> lattice;
@@ -71,11 +76,31 @@ static void RunEquivalenceScenario(unsigned seed, size_t max_len) {
                       std::to_string(len) + "_" + std::to_string(i);
         std::uniform_real_distribution<double> weight(-8.0, -1.0);
         entry->weight = weight(gen);
+        if (with_history) {
+          entry->text += "字";  // 单字不拿 unigram 分，凑够两个字符以上
+          entry->commit_count = static_cast<int>(gen() % 6);
+          texts.push_back(entry->text);
+        }
         entries.push_back(entry);
       }
       buckets[len][{static_cast<int>(start), static_cast<int>(len)}] =
           std::move(entries);
     }
+  }
+
+  if (with_history) {
+    std::mt19937 gen(seed);
+    for (int i = 0; i < 200; ++i) {
+      const string& a = texts[gen() % texts.size()];
+      const string& b = texts[gen() % texts.size()];
+      history.Record("", {a, b});
+      if (gen() % 2)
+        history.Record("", {a, b});
+    }
+    HistoryLmParams params;
+    params.unigram_weight = 1.0;
+    params.bigram_weight = 1.5;
+    poet.set_history(&history, params);
   }
 
   for (size_t len = 2; len <= max_len; ++len) {
@@ -200,6 +225,90 @@ TEST(PoetIncrementalTest, BeamSearchIncrementalMatchesFullRun) {
   for (unsigned seed = 1; seed <= 50; ++seed) {
     RunEquivalenceScenario(seed, 14);
   }
+}
+
+TEST(PoetIncrementalTest, HistoryBonusKeepsIncrementalEquivalence) {
+  Registry::instance().Register("grammar", new FakeGrammarComponent);
+  for (unsigned seed = 1; seed <= 50; ++seed)
+    RunEquivalenceScenario(seed, 14, true);
+  Registry::instance().Unregister("grammar");
+  for (unsigned seed = 1; seed <= 20; ++seed)
+    RunEquivalenceScenario(seed, 14, true);
+}
+
+// 这个|字段 vs 这个|一段：两条路径同码，系统模型偏向一段
+static an<Sentence> MakeZiduan(Poet& poet, int commits, const string& prev) {
+  WordGraph graph;
+  auto zhege = New<DictEntry>();
+  zhege->text = "这个";
+  zhege->weight = -4.0;
+  auto ziduan = New<DictEntry>();
+  ziduan->text = "字段";
+  ziduan->weight = -6.5;
+  ziduan->commit_count = commits;
+  auto yiduan = New<DictEntry>();
+  yiduan->text = "一段";
+  yiduan->weight = -5.0;
+  graph[0][2].push_back(zhege);
+  graph[2][4].push_back(yiduan);
+  graph[2][4].push_back(ziduan);
+  return poet.MakeSentence(graph, 4, prev);
+}
+
+TEST(PoetHistoryTest, UserWordWinsOnlyWhenEnabledAndFrequent) {
+  Registry::instance().Unregister("grammar");
+  Language lang("t9_test");
+  Poet poet(&lang, nullptr);
+  EXPECT_EQ("这个一段", MakeZiduan(poet, 219, "")->text());
+  UserHistoryLm history;
+  HistoryLmParams params;
+  poet.set_history(&history, params);  // 全 0 = 关
+  auto off = MakeZiduan(poet, 219, "");
+  EXPECT_EQ("这个一段", off->text());
+  params.unigram_weight = 1.0;
+  params.priority_min_commits = 2;
+  poet.set_history(&history, params);
+  EXPECT_EQ("这个字段", MakeZiduan(poet, 219, "")->text());
+  EXPECT_EQ("这个一段", MakeZiduan(poet, 1, "")->text());
+}
+
+TEST(PoetHistoryTest, BigramUsesPrecedingWordAndPredecessor) {
+  Registry::instance().Unregister("grammar");
+  Language lang("t9_test");
+  Poet poet(&lang, nullptr);
+  UserHistoryLm history;
+  history.Record("", {"这个", "字段"});
+  history.Record("", {"这个", "字段"});
+  history.Record("", {"所以", "这个"});
+  history.Record("", {"所以", "这个"});
+  HistoryLmParams params;
+  params.bigram_weight = 1.5;
+  poet.set_history(&history, params);
+  EXPECT_EQ("这个字段", MakeZiduan(poet, 0, "")->text());
+  auto with_prev = MakeZiduan(poet, 0, "所以");
+  auto without = MakeZiduan(poet, 0, "");
+  EXPECT_NEAR(with_prev->weight() - without->weight(), 1.5 * std::log1p(2.0),
+              1e-9);
+  auto multi = poet.MakeSentences(
+      [] {
+        WordGraph g;
+        auto a = New<DictEntry>();
+        a->text = "这个";
+        a->weight = -4.0;
+        auto z = New<DictEntry>();
+        z->text = "字段";
+        z->weight = -6.5;
+        auto y = New<DictEntry>();
+        y->text = "一段";
+        y->weight = -5.0;
+        g[0][2].push_back(a);
+        g[2][4].push_back(y);
+        g[2][4].push_back(z);
+        return g;
+      }(),
+      4, "", 2, 1.0);
+  ASSERT_FALSE(multi.empty());
+  EXPECT_EQ("这个字段", multi[0]->text());
 }
 
 TEST(PoetIncrementalTest, LongInputIncrementalMatchesFullRun) {

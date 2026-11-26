@@ -85,6 +85,22 @@ Poet::Poet(const Language* language, Config* config, Compare compare)
 
 Poet::~Poet() {}
 
+double Poet::HistoryBonus(const UserHistoryLm::SuccessorMap* successors,
+                          const DictEntry& entry) const {
+  return history_ ? rime::HistoryBonus(history_params_, successors, entry)
+                  : 0.0;
+}
+
+const UserHistoryLm::SuccessorMap* Poet::HistorySuccessors(
+    const Line& candidate,
+    const string& preceding_text) const {
+  if (!history_ || history_params_.bigram_weight <= 0)
+    return nullptr;
+  return history_->Successors(candidate.empty()
+                                  ? HistoryStartWord(preceding_text)
+                                  : candidate.last_word());
+}
+
 bool Poet::CompareWeight(const Line& one, const Line& other) {
   return one.weight < other.weight;
 }
@@ -211,6 +227,7 @@ void Poet::ExpandEdges(StateMap<Strategy>& states,
   const auto update = [this, &states, start_pos, rear_end_pos,
                        &preceding_text, min_end_pos, exclude_single_word,
                        &edges](const Line& candidate) {
+    const auto* successors = HistorySuccessors(candidate, preceding_text);
     for (const auto& ev : edges) {
       size_t end_pos = ev.first;
       // 增量模式跳过已固化的旧边（其效应已缓存在 states 里）
@@ -228,7 +245,8 @@ void Poet::ExpandEdges(StateMap<Strategy>& states,
             candidate.empty() ? preceding_text : candidate.context();
         double weight = candidate.weight +
                         Grammar::Evaluate(context, entry->text, entry->weight,
-                                          is_rear, grammar_.get());
+                                          is_rear, grammar_.get()) +
+                        HistoryBonus(successors, *entry);
         Line new_line{&candidate, entry.get(), end_pos, weight};
         Line& best = Strategy::BestLineToUpdate(target_state, new_line);
         if (best.empty() || compare_(best, new_line)) {
@@ -411,12 +429,15 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
       auto& target_state = states[end_pos];
 
       for (const auto& source_line : source_state) {
+        const auto* successors =
+            HistorySuccessors(source_line, preceding_text);
         for (const auto& entry : entries) {
           const string& context =
               source_line.empty() ? preceding_text : source_line.context();
           double weight = source_line.weight +
                           Grammar::Evaluate(context, entry->text, entry->weight,
-                                            is_rear, grammar_.get());
+                                            is_rear, grammar_.get()) +
+                          HistoryBonus(successors, *entry);
           size_t new_hash = source_line.text_hash;
           for (char c : entry->text) {
             new_hash = new_hash * 31 + c;

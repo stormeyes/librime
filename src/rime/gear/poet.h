@@ -14,6 +14,7 @@
 #include <rime/translation.h>
 #include <rime/gear/translator_commons.h>
 #include <rime/gear/contextual_translation.h>
+#include <rime/gear/user_history_lm.h>
 
 namespace rime {
 
@@ -53,6 +54,14 @@ class Poet {
        Config* config,
        Compare compare = CompareWeight);
   ~Poet();
+
+  // 用户历史加分（unigram 来自 userdb 词条、bigram 来自本机历史）；
+  // 参数全 0 时等同未设置
+  void set_history(const UserHistoryLm* history,
+                   const HistoryLmParams& params) {
+    history_ = params.enabled() ? history : nullptr;
+    history_params_ = params;
+  }
 
   an<Sentence> MakeSentence(const WordGraph& graph,
                             size_t total_length,
@@ -127,8 +136,16 @@ class Poet {
       size_t total_length,
       const string& preceding_text);
 
+  double HistoryBonus(const UserHistoryLm::SuccessorMap* successors,
+                      const DictEntry& entry) const;
+  const UserHistoryLm::SuccessorMap* HistorySuccessors(
+      const Line& candidate,
+      const string& preceding_text) const;
+
   const Language* language_;
   the<Grammar> grammar_;
+  const UserHistoryLm* history_ = nullptr;
+  HistoryLmParams history_params_;
   Compare compare_;
 };
 
